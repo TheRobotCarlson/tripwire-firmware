@@ -23,7 +23,7 @@
  *   0  u16 listener_id   origin listener
  *   2  u8  type          0 CLEAR, 1 ALARM, 2 CHECKIN
  *   3  u16 age_ds        tenths of a second since the sound began, +hold per relay
- *   5  u8  hops          +1 per relay, capped at 15
+ *   5  u8  hops          +1 per relay, capped at 63
  *   6  u8  f0_bin
  *   7  u8  rms_db
  *   8  u8  conf
@@ -56,7 +56,7 @@ extern "C" {
 #define TW_TYPE_ALARM    1
 #define TW_TYPE_CHECKIN  2
 
-#define TW_HOPS_MAX     15
+#define TW_HOPS_MAX     63
 
 typedef struct {
     uint16_t sender_id;

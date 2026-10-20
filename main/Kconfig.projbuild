@@ -31,6 +31,23 @@ choice BATEAR_ROLE
             via MQTT, bypassing the LoRa + Gateway path.
 endchoice
 
+config TRIPWIRE_LISTENER
+    bool "Tripwire listener (detector variant)"
+    default n
+    depends on BATEAR_ROLE_DETECTOR
+    help
+        Builds the detector as a tripwire listener. Today this only names
+        the build; the I2 relay and the duty-cycled sleep land here later.
+
+config TRIPWIRE_EDGE
+    bool "Tripwire edge receiver (gateway variant: no Wi-Fi, no MQTT, no transmit)"
+    default n
+    depends on BATEAR_ROLE_GATEWAY
+    help
+        Builds the gateway as a tripwire edge receiver. MqttTask (and with
+        it Wi-Fi) is not compiled, and the RadioLib transmit calls are
+        poisoned in gateway_task.cpp so any use is a compile error.
+
 config BATEAR_TELEMETRY_HEARTBEAT_MIN
     int "LoRa telemetry heartbeat interval (minutes)"
     default 30

@@ -72,7 +72,11 @@ extern "C" void app_main(void)
 
 #ifdef CONFIG_BATEAR_ROLE_DETECTOR
 
+#ifdef CONFIG_TRIPWIRE_LISTENER
+    ESP_LOGI(TAG, "Tripwire LISTENER (dev_id=%u)", lorawan_get_keys()->device_id);
+#else
     ESP_LOGI(TAG, "Batear DETECTOR (dev_id=%u)", lorawan_get_keys()->device_id);
+#endif
 
     g_drone_event_queue = xQueueCreate(4, sizeof(DroneEvent_t));
     if (g_drone_event_queue == NULL) {
@@ -104,6 +108,24 @@ extern "C" void app_main(void)
     }
 
     ESP_LOGI(TAG, "Detector running — AudioTask(Core1) + LoRaTask(Core0)");
+
+#elif defined(CONFIG_BATEAR_ROLE_GATEWAY) && defined(CONFIG_TRIPWIRE_EDGE)
+
+    ESP_LOGI(TAG, "Tripwire EDGE (receive only, no Wi-Fi/MQTT)");
+
+    static TaskHandle_t gw_h;
+
+    BaseType_t ret = xTaskCreatePinnedToCore(
+        GatewayTask, "GatewayTask",
+        8 * 1024 / sizeof(StackType_t),
+        NULL, configMAX_PRIORITIES - 2,
+        &gw_h, 0);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "GatewayTask create failed — halting");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Edge running — GatewayTask(Core0)");
 
 #elif defined(CONFIG_BATEAR_ROLE_GATEWAY)
 

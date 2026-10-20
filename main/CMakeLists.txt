@@ -19,7 +19,10 @@ if(CONFIG_BATEAR_ROLE_DETECTOR)
 endif()
 
 if(CONFIG_BATEAR_ROLE_GATEWAY)
-    list(APPEND SRCS "oled.c" "gateway_task.cpp" "mqtt_task.cpp")
+    list(APPEND SRCS "oled.c" "gateway_task.cpp")
+    if(NOT CONFIG_TRIPWIRE_EDGE)
+        list(APPEND SRCS "mqtt_task.cpp")
+    endif()
 endif()
 
 if(CONFIG_BATEAR_ROLE_WIRED_DETECTOR)

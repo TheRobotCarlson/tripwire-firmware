@@ -23,6 +23,11 @@
 #include <RadioLib.h>
 #include <inttypes.h>
 
+#ifdef CONFIG_TRIPWIRE_EDGE
+/* The edge receiver must never transmit: any later use of these is a compile error. */
+#pragma GCC poison transmit startTransmit finishTransmit transmitDirect
+#endif
+
 static const char *TAG = "gw";
 
 /* LoRa RF — must match detector (freq and sync_word come from NVS at runtime) */
@@ -297,6 +302,7 @@ extern "C" void GatewayTask(void *pvParameters)
         update_led();
         display_event(&pt, rssi, snr);
 
+#ifndef CONFIG_TRIPWIRE_EDGE
         if (g_mqtt_event_queue) {
             MqttEvent_t mev = {};
             mev.device_id     = pt.device_id;
@@ -319,5 +325,6 @@ extern "C" void GatewayTask(void *pvParameters)
                 ESP_LOGW(TAG, "MQTT queue full — event dropped");
             }
         }
+#endif
     }
 }

@@ -26,6 +26,10 @@ jobs:
             flash_size: 8MB
           - role: wired_detector
             flash_size: 16MB
+          - role: listener
+            flash_size: 8MB
+          - role: edge
+            flash_size: 8MB
 
     steps:
       - name: Checkout code
@@ -39,6 +43,19 @@ jobs:
           . $IDF_PATH/export.sh
           rm -rf build sdkconfig
           env SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.${{ matrix.role }}" idf.py set-target esp32s3
+          idf.py build
+
+      - name: Edge cannot call transmit (the poison must fail a build)
+        if: matrix.role == 'edge'
+        run: |
+          . $IDF_PATH/export.sh
+          cp main/gateway_task.cpp /tmp/gateway_task.cpp
+          echo 'void tw_poison_probe(SX1262 *r) { uint8_t b = 0; r->transmit(&b, 1); }' >> main/gateway_task.cpp
+          if idf.py build > /tmp/probe.log 2>&1; then
+            echo "edge build accepted a transmit call"; exit 1
+          fi
+          grep -q 'attempt to use poisoned "transmit"' /tmp/probe.log || { tail -40 /tmp/probe.log; exit 1; }
+          cp /tmp/gateway_task.cpp main/gateway_task.cpp
           idf.py build
 
       - name: Capture size
@@ -193,3 +210,5 @@ jobs:
             merged_detector.bin
             merged_gateway.bin
             merged_wired_detector.bin
+            merged_listener.bin
+            merged_edge.bin

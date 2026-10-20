@@ -99,17 +99,17 @@ alert = 1031 1 24 2 42 61 200 0 165 58 118 1 0 0
 iv = 2b7e15160904010000000000
 packet = 09040100000000002dad2214962ed1ba270802fd1fd21316b989fdf28cb35f3995e498348678adeb
 
-# age saturates at 65535, hops stays at 15, rssi clamps at 255
+# age saturates at 65535, hops stays at 63, rssi clamps at 255
 [relay]
 name = relay_saturates
 key = 2b7e151628aed2a6abf7158809cf4f3c
-input = 07040100090000005e7bd5e1a9578057babb6f15bf2309fbba66c458c4db77dcdfcce1cfac145dce
+input = 07040100090000005e7bd5e1a9678057babb6f15bf2309fb2ea2edf0c2710c940a6a7d8683fdbd8c
 relay_nonce = 1034 2 5
 hold_ds = 10
 rssi_dbm = -300
-alert = 1031 1 65535 15 0 0 0 0 0 0 255 1 9 0
+alert = 1031 1 65535 63 0 0 0 0 0 0 255 1 9 0
 iv = 2b7e15160a04020005000000
-packet = 0a04020005000000c1aeb0ac7dea48dfcee794082adb75a3360adc2a5ea9204c4f6530104d1793bd
+packet = 0a04020005000000c1aeb0ac7dda48dfcee794082adb75a3a2cef58258035b049ac3ac5962fe73ff
 
 # each of these must fail to decrypt
 [open_fail]
