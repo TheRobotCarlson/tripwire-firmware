@@ -54,7 +54,7 @@ jobs:
           if idf.py build > /tmp/probe.log 2>&1; then
             echo "edge build accepted a transmit call"; exit 1
           fi
-          grep -q 'attempt to use poisoned "transmit"' /tmp/probe.log || { tail -40 /tmp/probe.log; exit 1; }
+          grep -q "attempt to use poisoned .transmit." /tmp/probe.log || { tail -40 /tmp/probe.log; exit 1; }
           cp /tmp/gateway_task.cpp main/gateway_task.cpp
           idf.py build
 
