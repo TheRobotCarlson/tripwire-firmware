@@ -25,6 +25,7 @@
 #include "esp_system.h"
 #include "esp_random.h"
 #include "esp_app_desc.h"
+#include "nvs.h"
 #include <inttypes.h>
 #include <cstdio>
 
@@ -42,8 +43,8 @@ static const char *TAG = "lora";
 #define LORA_MAX_CONSECUTIVE_FAILS  3
 
 /* One local retry for alarm/clear on a randomised 150–300 ms backoff. The
- * second attempt reuses the same seq + ciphertext so the gateway's replay
- * counter dedupes if the first packet actually made it over the air. */
+ * second attempt reuses the same nonce + ciphertext so the gateway's replay
+ * check dedupes if the first packet actually made it over the air. */
 #define LORA_EVENT_RETRIES          1
 #define LORA_RETRY_BACKOFF_MIN_MS  150
 #define LORA_RETRY_BACKOFF_MAX_MS  300
@@ -77,7 +78,8 @@ static EspIdfHal *s_hal    = nullptr;
 static Module    *s_module = nullptr;
 static SX1262    *s_radio  = nullptr;
 
-static uint16_t s_tx_seq = 0;
+/* Nonce state (tw_codec I1a): device_id + boot count from flash + counter. */
+static tw_tx_t  s_tx;
 static uint32_t s_tx_fail_total = 0;   /* monotonic, clamped to 255 on the wire */
 static uint32_t s_boot_ms = 0;
 
@@ -137,6 +139,42 @@ static void fill_telemetry(lora_plaintext_t *pt)
 /* =========================================================================
  * Internal helpers
  * ====================================================================== */
+
+#define LORA_NONCE_NVS_NS   "lora_nonce"
+#define LORA_NONCE_NVS_KEY  "boot"
+
+/* Write the boot count before any packet uses it. If this fails we must not
+ * transmit: after the next reboot the same boot would be reused, and so
+ * would every IV. */
+static bool nonce_persist_boot(uint16_t boot)
+{
+    nvs_handle_t h;
+    if (nvs_open(LORA_NONCE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u16(h, LORA_NONCE_NVS_KEY, boot);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err == ESP_OK;
+}
+
+static bool nonce_start(void)
+{
+    uint16_t stored = 0;
+    nvs_handle_t h;
+    if (nvs_open(LORA_NONCE_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_u16(h, LORA_NONCE_NVS_KEY, &stored);
+        nvs_close(h);
+    }
+    if (tw_tx_start(&s_tx, lorawan_get_keys()->device_id, stored) != TW_OK) {
+        ESP_LOGE(TAG, "boot count exhausted (%u) — rotate the network key", (unsigned)stored);
+        return false;
+    }
+    if (!nonce_persist_boot(s_tx.boot)) {
+        ESP_LOGE(TAG, "cannot persist boot count — refusing to transmit");
+        return false;
+    }
+    ESP_LOGI(TAG, "nonce: device=%u boot=%u", (unsigned)s_tx.sender_id, (unsigned)s_tx.boot);
+    return true;
+}
 
 static bool lora_init(void)
 {
@@ -245,6 +283,12 @@ extern "C" void LoRaTask(void *pvParameters)
     parse_fw_version();
     battery_init();
 
+    if (!nonce_start()) {
+        ESP_LOGE(TAG, "FATAL: nonce state unavailable — suspending LoRaTask");
+        vTaskSuspend(NULL);
+        return;
+    }
+
     if (!lora_init()) {
         ESP_LOGE(TAG, "FATAL: radio init failed — suspending LoRaTask");
         vTaskSuspend(NULL);
@@ -286,8 +330,17 @@ extern "C" void LoRaTask(void *pvParameters)
         /* Prepare the payload once — seq, plaintext and ciphertext are all
          * reused across the retry, so a successful over-air delivery that was
          * mis-reported locally is dedup'd by the gateway's replay counter. */
+        tw_nonce_t nonce;
+        bool persist_boot = false;
+        if (tw_tx_take(&s_tx, &nonce, &persist_boot) != TW_OK ||
+            (persist_boot && !nonce_persist_boot(s_tx.boot))) {
+            ESP_LOGE(TAG, "FATAL: nonce space exhausted or boot not persisted — suspending");
+            vTaskSuspend(NULL);
+            return;
+        }
+
         lora_plaintext_t pt = {};
-        pt.seq        = s_tx_seq++;
+        pt.seq        = static_cast<uint16_t>(nonce.counter);
         pt.device_id  = lorawan_get_keys()->device_id;
         pt.event_type = static_cast<uint8_t>(ev.type);
         pt.f0_bin     = is_heartbeat ? 0 : static_cast<uint8_t>(ev.f0_bin);
@@ -296,7 +349,7 @@ extern "C" void LoRaTask(void *pvParameters)
 
         lora_packet_t pkt;
         const uint8_t *net_key = lorawan_get_keys()->app_key;
-        if (!lora_encrypt(net_key, pt.seq, &pt, &pkt)) {
+        if (!lora_encrypt(net_key, &nonce, &pt, &pkt)) {
             /* Encrypt failures are software-level (PSA init, key import) —
              * retrying will not help and burns airtime budget. Bail early. */
             ESP_LOGE(TAG, "encrypt failed — dropping seq=%u", (unsigned)pt.seq);

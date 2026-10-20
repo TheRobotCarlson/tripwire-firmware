@@ -3,8 +3,15 @@
  *
  * Uses PSA Crypto API (mbedtls 4.x / ESP-IDF 6.x).
  *
- * Packet wire format (36 bytes total):
- *   [4B nonce] [32B AEAD output = 16B ciphertext + 16B GCM tag]
+ * Packet wire format (40 bytes total):
+ *   [8B nonce] [32B AEAD output = 16B ciphertext + 16B GCM tag]
+ *
+ * Nonce = [2B device_id][2B boot][4B counter], little-endian (tw_codec I1a).
+ * boot is a flash-stored count bumped on every start, so the GCM IV
+ * (key[0..3] || nonce) never repeats across detectors, reboots or counter
+ * wrap. The previous 4-byte nonce was a per-boot uint16 counter shared by
+ * every detector under one key: two detectors reused IVs, and a rebooted
+ * detector was rejected as a replay until its counter passed the old value.
  *
  * Plaintext (16 bytes):
  *   [2B seq] [1B device_id] [1B event_type] [1B f0_bin] [1B rms_db]
@@ -27,18 +34,17 @@
 #include <string.h>
 #include <math.h>
 #include "esp_log.h"
-#include "psa/crypto.h"
+#include "tw_codec.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define LORA_PLAINTEXT_LEN   16
-#define LORA_NONCE_LEN       4
+#define LORA_NONCE_LEN       TW_NONCE_LEN
 #define LORA_GCM_TAG_LEN    16
 #define LORA_AEAD_OUT_LEN   (LORA_PLAINTEXT_LEN + LORA_GCM_TAG_LEN)
 #define LORA_PACKET_LEN     (LORA_NONCE_LEN + LORA_AEAD_OUT_LEN)
-#define LORA_GCM_IV_LEN     12
 
 #define LORA_EVENT_CLEAR      0x00
 #define LORA_EVENT_ALARM      0x01
@@ -75,82 +81,26 @@ typedef struct __attribute__((packed)) {
 } lora_packet_t;
 
 _Static_assert(sizeof(lora_packet_t) == LORA_PACKET_LEN, "packet size mismatch");
+_Static_assert(LORA_PACKET_LEN == TW_PACKET_LEN, "envelope must match tw_codec");
 
-static inline void lora_build_iv(const uint8_t key[16],
-                                 const uint8_t nonce[LORA_NONCE_LEN],
-                                 uint8_t iv_out[LORA_GCM_IV_LEN])
-{
-    memcpy(iv_out, key, 8);
-    memcpy(iv_out + 8, nonce, LORA_NONCE_LEN);
-}
-
+/* seq in the plaintext is kept for logs and MQTT; it is the low 16 bits of
+ * the nonce counter. Replay checks use the nonce, never seq. */
 static inline bool lora_encrypt(const uint8_t key[16],
-                                uint32_t counter,
+                                const tw_nonce_t *nonce,
                                 const lora_plaintext_t *pt,
                                 lora_packet_t *pkt)
 {
-    psa_status_t status = psa_crypto_init();
-    if (status != PSA_SUCCESS) return false;
-
-    memcpy(pkt->nonce, &counter, LORA_NONCE_LEN);
-
-    uint8_t iv[LORA_GCM_IV_LEN];
-    lora_build_iv(key, pkt->nonce, iv);
-
-    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
-    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT);
-    psa_set_key_algorithm(&attr, PSA_ALG_GCM);
-    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
-    psa_set_key_bits(&attr, 128);
-
-    psa_key_id_t kid;
-    status = psa_import_key(&attr, key, 16, &kid);
-    if (status != PSA_SUCCESS) return false;
-
-    size_t out_len = 0;
     // cppcheck-suppress cstyleCast
-    const uint8_t *pt_bytes = (const uint8_t *)pt;
-    status = psa_aead_encrypt(kid, PSA_ALG_GCM,
-                               iv, LORA_GCM_IV_LEN,
-                               NULL, 0,
-                               pt_bytes, LORA_PLAINTEXT_LEN,
-                               pkt->aead, LORA_AEAD_OUT_LEN,
-                               &out_len);
-    psa_destroy_key(kid);
-    return status == PSA_SUCCESS && out_len == LORA_AEAD_OUT_LEN;
+    return tw_seal(key, nonce, (const uint8_t *)pt, (uint8_t *)pkt) == TW_OK;
 }
 
 static inline bool lora_decrypt(const uint8_t key[16],
                                 const lora_packet_t *pkt,
+                                tw_nonce_t *nonce_out,
                                 lora_plaintext_t *pt_out)
 {
-    psa_status_t status = psa_crypto_init();
-    if (status != PSA_SUCCESS) return false;
-
-    uint8_t iv[LORA_GCM_IV_LEN];
-    lora_build_iv(key, pkt->nonce, iv);
-
-    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
-    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_DECRYPT);
-    psa_set_key_algorithm(&attr, PSA_ALG_GCM);
-    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
-    psa_set_key_bits(&attr, 128);
-
-    psa_key_id_t kid;
-    status = psa_import_key(&attr, key, 16, &kid);
-    if (status != PSA_SUCCESS) return false;
-
-    size_t out_len = 0;
     // cppcheck-suppress cstyleCast
-    uint8_t *pt_out_bytes = (uint8_t *)pt_out;
-    status = psa_aead_decrypt(kid, PSA_ALG_GCM,
-                               iv, LORA_GCM_IV_LEN,
-                               NULL, 0,
-                               pkt->aead, LORA_AEAD_OUT_LEN,
-                               pt_out_bytes, LORA_PLAINTEXT_LEN,
-                               &out_len);
-    psa_destroy_key(kid);
-    return status == PSA_SUCCESS;
+    return tw_open(key, (const uint8_t *)pkt, nonce_out, (uint8_t *)pt_out) == TW_OK;
 }
 
 static inline uint8_t lora_vbat_encode(uint32_t mv)

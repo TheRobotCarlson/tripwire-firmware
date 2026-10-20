@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Fix Git Directory Permissions
-        run: git config --global --add safe.directory /__w/batear/batear
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Build
         run: |

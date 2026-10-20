@@ -41,6 +41,7 @@ set(PRIV_DEPS
     ${MQTT_COMPONENT}
     espressif__esp-dsp
     mbedtls
+    tw_codec
     nvs_flash
     console
     app_update

@@ -21,6 +21,7 @@
 #include "esp_timer.h"
 #include "driver/gpio.h"
 #include <RadioLib.h>
+#include <inttypes.h>
 
 static const char *TAG = "gw";
 
@@ -37,6 +38,8 @@ typedef struct {
     bool     seen;
     bool     alarm;
     uint16_t last_seq;
+    uint16_t last_boot;
+    uint32_t last_counter;
     uint16_t last_vbat_mv;
 } device_state_t;
 
@@ -235,16 +238,31 @@ extern "C" void GatewayTask(void *pvParameters)
 
         lora_plaintext_t pt;
         const uint8_t *net_key = lorawan_get_keys()->app_key;
-        if (!lora_decrypt(net_key, reinterpret_cast<lora_packet_t *>(rx_buf), &pt)) {
+        tw_nonce_t nonce;
+        if (!lora_decrypt(net_key, reinterpret_cast<lora_packet_t *>(rx_buf), &nonce, &pt)) {
             ESP_LOGW(TAG, "decrypt FAILED — wrong key or forged");
             s_reject_count++;
             display_idle();
             continue;
         }
 
+        /* The nonce names the sender; Batear has no relays, so it must match
+         * the plaintext's device_id. */
+        if (nonce.sender_id != pt.device_id) {
+            ESP_LOGW(TAG, "nonce sender %u != device_id %u", (unsigned)nonce.sender_id,
+                     (unsigned)pt.device_id);
+            s_reject_count++;
+            display_idle();
+            continue;
+        }
+
+        /* Replay check on (boot, counter) from the nonce: a rebooted detector
+         * has a higher boot and is accepted even though its counter restarted. */
         device_state_t *dev = &s_devices[pt.device_id];
-        if (dev->seen && pt.seq <= dev->last_seq) {
-            ESP_LOGW(TAG, "REPLAY dev=0x%02X seq=%u", pt.device_id, pt.seq);
+        if (dev->seen && !(nonce.boot > dev->last_boot ||
+                           (nonce.boot == dev->last_boot && nonce.counter > dev->last_counter))) {
+            ESP_LOGW(TAG, "REPLAY dev=0x%02X boot=%u ctr=%" PRIu32, pt.device_id,
+                     (unsigned)nonce.boot, nonce.counter);
             s_reject_count++;
             display_idle();
             continue;
@@ -253,6 +271,8 @@ extern "C" void GatewayTask(void *pvParameters)
         s_rx_count++;
         dev->seen     = true;
         dev->last_seq = pt.seq;
+        dev->last_boot    = nonce.boot;
+        dev->last_counter = nonce.counter;
         /* Heartbeat packets carry telemetry only — never clobber the cached
          * alarm state with them, so an ALARM→heartbeat sequence keeps the
          * LED and MQTT discovery binary_sensor in the ALARM state. */
