@@ -41,7 +41,17 @@ static const char *TAG = "audio";
 #define CONF_OFF            0.18f
 #define SUSTAIN_FRAMES_ON   2
 #define SUSTAIN_FRAMES_OFF  8
-#define RMS_MIN             0.0004f
+/* Below this windowed RMS a frame counts as silence and is not analysed.
+ * Batear's 0.0004 (-68 dBFS) sits near 57 dB SPL at the mic: louder than a
+ * quiet field, so a distant drone could never be heard. 0.00003 (-90 dBFS,
+ * about 37 dB SPL) sits just above the INMP441's own hiss (about 33 dB(A)). */
+#define RMS_MIN             0.00003f
+
+/* Level at the mic in dB SPL for a windowed RMS of 1.0: the INMP441 and the
+ * ICS-43434 both read -26 dBFS (re a full-scale sine) at 94 dB SPL, so an RMS
+ * of 1.0 is 94 + 26 + 3.0 = 123.0 dB SPL, plus 4.3 dB for the Hann window's
+ * mean square of 3/8. */
+#define LEVEL_DB_AT_WIN_RMS1  (123.0f - 10.f * log10f(0.375f))
 
 static float __attribute__((aligned(16))) s_fft_work[2 * FRAME_SAMPLES];
 static int32_t __attribute__((aligned(16))) s_raw[FRAME_SAMPLES];
@@ -56,6 +66,32 @@ static int16_t __attribute__((aligned(16))) s_pcm16[FRAME_SAMPLES];
 #endif
 
 static i2s_chan_handle_t s_rx = NULL;
+
+/* IEC 61672 A-weighting, as a power gain, per PSD bin. */
+static float s_aw2[AUDIO_PROC_PSD_BINS];
+
+static void build_a_weighting(void)
+{
+    for (int k = 0; k < AUDIO_PROC_PSD_BINS; k++) {
+        const double f2 = (double)(k * AUDIO_PROC_BIN_HZ) * (double)(k * AUDIO_PROC_BIN_HZ);
+        const double ra = (148693636.0 * f2 * f2) /
+                          ((f2 + 424.36) * sqrt((f2 + 11599.29) * (f2 + 544496.41)) * (f2 + 148693636.0));
+        s_aw2[k] = (float)(ra * ra * 1.584893192);  /* +2.00 dB: 0 dB at 1 kHz */
+    }
+}
+
+/* Share of a frame's power that survives A-weighting. Interior bins stand for
+ * both halves of the spectrum, so they count twice. */
+static float a_weighted_share(const float *psd)
+{
+    double all = 0.0, a = 0.0;
+    for (int k = 0; k < AUDIO_PROC_PSD_BINS; k++) {
+        const double c = (k == 0 || k == AUDIO_PROC_PSD_BINS - 1) ? 1.0 : 2.0;
+        all += c * psd[k];
+        a   += c * psd[k] * s_aw2[k];
+    }
+    return all > 0.0 ? (float)(a / all) : 0.f;
+}
 static float             s_conf_ema = 0.f;
 
 static esp_err_t i2s_microphone_init(void)
@@ -255,6 +291,30 @@ void AudioTask(void *pvParameters)
 
         const float *psd = audio_processor_last_psd();
         const float rms  = audio_processor_last_rms();
+
+        /* Once a second, the A-weighted level at the mic: the logger reads it
+         * over USB and sets the mic phone's meter from it. */
+        {
+            static double  lvl_a = 0.0, lvl_z = 0.0;
+            static int     lvl_n = 0;
+            static int64_t lvl_t0 = 0;
+            static bool    lvl_ready = false;
+            if (!lvl_ready) { build_a_weighting(); lvl_ready = true; }
+            const double ms = (double)rms * (double)rms;
+            lvl_a += ms * a_weighted_share(psd);
+            lvl_z += ms;
+            lvl_n++;
+            const int64_t t = esp_timer_get_time();
+            if (lvl_t0 == 0) lvl_t0 = t;
+            if (t - lvl_t0 >= 1000000LL) {
+                const double la = lvl_a / lvl_n, lz = lvl_z / lvl_n;
+                ESP_LOGI(TAG, "level: LAeq=%.1f dBA LZeq=%.1f dB rms=%.1f dBFS gate=%.1f dBFS",
+                         la > 0.0 ? 10.0 * log10(la) + LEVEL_DB_AT_WIN_RMS1 : 0.0,
+                         lz > 0.0 ? 10.0 * log10(lz) + LEVEL_DB_AT_WIN_RMS1 : 0.0,
+                         lz > 0.0 ? 10.0 * log10(lz) : -120.0, 20.0 * log10(RMS_MIN));
+                lvl_a = lvl_z = 0.0; lvl_n = 0; lvl_t0 = t;
+            }
+        }
 
         frames_total++;
         if ((frames_total % 300) == 0) {
