@@ -10,6 +10,7 @@
 
 #include "lora_task.h"
 #include "drone_detector.h"
+#include "audio_processor.h"
 #include "lora_crypto.h"
 #include "lorawan_provision.h"
 #include "battery.h"
@@ -349,7 +350,9 @@ extern "C" void LoRaTask(void *pvParameters)
         pt.device_id  = lorawan_get_keys()->device_id;
         pt.event_type = static_cast<uint8_t>(ev.type);
         pt.f0_bin     = is_heartbeat ? 0 : static_cast<uint8_t>(ev.f0_bin);
-        pt.rms_db     = is_heartbeat ? 0 : lora_rms_to_db(ev.rms);
+        /* A check-in carries the mic level now, so the field test sees what the
+         * listener hears between alarms. */
+        pt.rms_db     = lora_rms_to_db(is_heartbeat ? audio_processor_last_rms() : ev.rms);
         fill_telemetry(&pt);
 
         lora_packet_t pkt;

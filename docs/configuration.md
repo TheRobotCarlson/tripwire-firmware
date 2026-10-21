@@ -308,7 +308,7 @@ Both the gateway and the wired detector use the same topic structure:
 | `drone_detected` | `true` for ALARM, `false` otherwise. Heartbeats preserve the last known alarm state, so a detector that armed an alarm and then silently sends heartbeats keeps `drone_detected: true` until a CLEAR event arrives. |
 | `event` | `"alarm"`, `"clear"`, or `"heartbeat"` — the raw packet type. |
 | `rssi` / `snr` | Received-signal quality at the gateway for this specific packet (dBm / dB). |
-| `rms_db` / `f0_bin` | Acoustic signature fields; zero on heartbeat. |
+| `rms_db` / `f0_bin` | Acoustic signature fields. A heartbeat carries the mic level at send time in `rms_db` and `0` in `f0_bin`. |
 | `seq` | Monotonic packet counter per detector. |
 | `battery_v` | Detector battery voltage decoded from `vbat_cv` (0.01 V resolution). |
 | `fw_version` | Detector firmware version parsed from its `esp_app_desc` git tag. |

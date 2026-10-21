@@ -18,7 +18,7 @@ The 8-byte nonce is `[2B device_id][2B boot][4B counter]`, little-endian. `boot`
 | 2 | 1 | `device_id` | 0–255, unique per detector |
 | 3 | 1 | `event_type` | `0x00` CLEAR, `0x01` ALARM, `0x02` TELEMETRY (heartbeat) |
 | 4 | 1 | `f0_bin` | Harmonic fundamental bin index (`0` on heartbeat) |
-| 5 | 1 | `rms_db` | Frame RMS, dBFS + 96 offset (`0` on heartbeat) |
+| 5 | 1 | `rms_db` | Frame RMS, dBFS + 96 offset (on a heartbeat, the latest frame at send time) |
 | 6 | 1 | `vbat_cv` | Battery voltage: `V = 2.50 + vbat_cv × 0.01`, range 2.50–5.05 V |
 | 7 | 1 | `fw_major` | Parsed from `esp_app_get_description()` |
 | 8 | 1 | `fw_minor` | |
