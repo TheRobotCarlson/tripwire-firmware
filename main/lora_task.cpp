@@ -215,6 +215,11 @@ static bool lora_init(void)
         return false;
     }
 
+#if defined(PIN_LORA_RXEN) && PIN_LORA_RXEN >= 0
+    /* XIAO Wio-SX1262: DIO2 switches TX, the host gates the RX path */
+    s_radio->setRfSwitchPins(PIN_LORA_RXEN, RADIOLIB_NC);
+#endif
+
     ESP_LOGI(TAG, "SX1262 ready  freq=%.1f MHz  SF=%d  BW=%.0f kHz  pwr=%d dBm  sw=0x%02X",
              freq_mhz, LORA_SF, LORA_BW_KHZ, LORA_TX_DBM, sync_word);
     return true;

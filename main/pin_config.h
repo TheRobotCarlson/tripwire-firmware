@@ -58,6 +58,8 @@
 #define PIN_VEXT        36
 #define BOARD_HAS_VEXT   1
 #define BOARD_HAS_OLED   1
+#define BOARD_HAS_LED    1
+#define PIN_LORA_RXEN   -1             /* DIO2 alone switches the antenna */
 
 /* No on-board SD card on Heltec V3/V4 */
 #define BOARD_HAS_SDMMC  0
@@ -128,6 +130,63 @@
 #define BOARD_LORA_DIO2_AS_RF   false
 
 /* No battery monitor on this board (USB/PoE powered) */
+#define BOARD_HAS_VBAT           0
+
+/* =====================================================================
+ * Board: Seeed XIAO ESP32S3 + Wio-SX1262 kit  (ESP32-S3R8 + SX1262)
+ * =====================================================================
+ *
+ * The Wio-SX1262 carrier snaps under the XIAO. Pins match Meshtastic's
+ * seeed_xiao_s3 variant and MeshCore's xiao_s3_wio.
+ *
+ * Occupied by the radio — do NOT use for I2S:
+ *   GPIO 7,8,9   — SX1262 SPI (D8, D9, D10)
+ *   GPIO 38..42  — RXEN, DIO1, BUSY, NSS, RST (bottom pads)
+ *   GPIO 19,20   — native USB (no UART bridge: console is USB Serial/JTAG)
+ *   GPIO 21      — XIAO user LED, and the Wio carrier's user button
+ *
+ * Free pins for I2S mic (side headers):
+ *   GPIO 1..6 (D0..D5), 43, 44 (D6, D7)
+ * The mic uses GPIO 4,5,6 like the Heltec, printed D3, D4, D5 on the XIAO.
+ * ===================================================================== */
+#elif defined(CONFIG_BATEAR_BOARD_XIAO_S3_WIO_SX1262)
+
+#define BOARD_IDF_TARGET    "esp32s3"
+#define BOARD_FLASH_SIZE    "8MB"
+
+/* I2S microphone — D3 / D4 / D5 */
+#define PIN_I2S_BCLK     4
+#define PIN_I2S_WS       5
+#define PIN_I2S_DIN      6
+
+/* LoRa SX1262 SPI — fixed carrier wiring */
+#define PIN_LORA_SCK     7
+#define PIN_LORA_MISO    8
+#define PIN_LORA_MOSI    9
+#define PIN_LORA_CS     41
+#define PIN_LORA_DIO1   39
+#define PIN_LORA_RST    42
+#define PIN_LORA_BUSY   40
+#define PIN_LORA_RXEN   38             /* RX LNA path; RadioLib drives it HIGH in RX */
+
+/* No OLED, no Vext. GPIO 21 is shared with the carrier's button, so the
+ * gateway leaves the LED alone and reports status over USB/MQTT only. */
+#define PIN_OLED_SDA    -1
+#define PIN_OLED_SCL    -1
+#define PIN_OLED_RST    -1
+#define PIN_LED         -1
+#define PIN_VEXT        -1
+#define BOARD_HAS_VEXT   0
+#define BOARD_HAS_OLED   0
+#define BOARD_HAS_LED    0
+
+#define BOARD_HAS_SDMMC  0
+
+/* LoRa RF traits */
+#define BOARD_LORA_TCXO_V       1.8f
+#define BOARD_LORA_DIO2_AS_RF   true
+
+/* The carrier charges a LiPo but has no VBAT divider to read it */
 #define BOARD_HAS_VBAT           0
 
 /* ===================================================================== */

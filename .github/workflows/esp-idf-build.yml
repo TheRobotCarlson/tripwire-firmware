@@ -30,6 +30,10 @@ jobs:
             flash_size: 8MB
           - role: edge
             flash_size: 8MB
+          - role: detector_xiao
+            flash_size: 8MB
+          - role: gateway_xiao
+            flash_size: 8MB
 
     steps:
       - name: Checkout code
@@ -212,3 +216,5 @@ jobs:
             merged_wired_detector.bin
             merged_listener.bin
             merged_edge.bin
+            merged_detector_xiao.bin
+            merged_gateway_xiao.bin

@@ -78,6 +78,9 @@ static bool gw_radio_init(void)
     }
     s_radio->setTCXO(BOARD_LORA_TCXO_V);
     s_radio->setDio2AsRfSwitch(BOARD_LORA_DIO2_AS_RF);
+#if defined(PIN_LORA_RXEN) && PIN_LORA_RXEN >= 0
+    s_radio->setRfSwitchPins(PIN_LORA_RXEN, RADIOLIB_NC);
+#endif
 
     ESP_LOGI(TAG, "SX1262 ready  freq=%.1f MHz  SF=%d  BW=%.0f kHz  sw=0x%02X",
              freq_mhz, LORA_SF, LORA_BW_KHZ, sync_word);
@@ -160,7 +163,11 @@ static void update_led(void)
     for (int i = 0; i < MAX_DEVICES; i++) {
         if (s_devices[i].seen && s_devices[i].alarm) { any = true; break; }
     }
+#if BOARD_HAS_LED
     gpio_set_level((gpio_num_t)PIN_LED, any ? 1 : 0);
+#else
+    (void)any;
+#endif
 }
 
 /* ---- task entry ---- */
@@ -179,19 +186,23 @@ extern "C" void GatewayTask(void *pvParameters)
     vTaskDelay(pdMS_TO_TICKS(50));
 #endif
 
-    /* OLED */
+    /* OLED (without one, oled_flush() is a no-op) */
+#if BOARD_HAS_OLED
     oled_init(PIN_OLED_SDA, PIN_OLED_SCL, PIN_OLED_RST);
+#endif
     oled_clear();
     oled_print(0, 0, "BATEAR GATEWAY");
     oled_print(0, 2, "Initializing...");
     oled_flush();
 
     /* LED */
+#if BOARD_HAS_LED
     gpio_config_t led_cfg = {};
     led_cfg.pin_bit_mask = (1ULL << PIN_LED);
     led_cfg.mode = GPIO_MODE_OUTPUT;
     gpio_config(&led_cfg);
     gpio_set_level((gpio_num_t)PIN_LED, 0);
+#endif
 
     /* LoRa */
     if (!gw_radio_init()) {

@@ -11,6 +11,7 @@ Same codebase builds as **Detector**, **Gateway**, or **Wired Detector** via sdk
 | Heltec WiFi LoRa 32 V3 | `esp32s3` | 8 MB |
 | Heltec WiFi LoRa 32 V4 | `esp32s3` | 16 MB |
 | LILYGO T-ETH-Lite S3 | `esp32s3` | 16 MB |
+| Seeed XIAO ESP32S3 + Wio-SX1262 | `esp32s3` | 8 MB (`sdkconfig.detector_xiao`, `sdkconfig.gateway_xiao`) |
 
 ## Build & Flash
 
@@ -150,6 +151,20 @@ batear/
 | SD SCK  | 7 | on-board |
 | SD CS   | 42 | on-board (SD's D3 in 4-bit nomenclature) |
 | BOOT button | 0 | strap pin, configured input-only AFTER Ethernet is up so `idf.py flash` is unaffected. Push-to-talk: hold to record, release to stop. |
+
+## Pin Map (pin_config.h, Seeed XIAO ESP32S3 + Wio-SX1262)
+
+Pins match Meshtastic's `seeed_xiao_s3` variant. No OLED, no LED, no VBAT divider. The console is USB Serial/JTAG (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`), since the XIAO has no UART bridge.
+
+| Function | GPIO | XIAO label |
+|---|---|---|
+| I2S BCLK | 4 | D3 |
+| I2S WS | 5 | D4 |
+| I2S DIN | 6 | D5 |
+| LoRa SCK / MISO / MOSI | 7 / 8 / 9 | D8 / D9 / D10 |
+| LoRa CS | 41 | carrier |
+| LoRa DIO1 / BUSY / RST | 39 / 40 / 42 | carrier |
+| LoRa RXEN | 38 | carrier; `setRfSwitchPins(38, NC)` with DIO2 as the TX switch |
 
 ## Calibration
 

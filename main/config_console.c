@@ -475,9 +475,16 @@ void config_console_init(void)
     repl_cfg.prompt = "batear> ";
     repl_cfg.max_cmdline_length = 256;
 
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    /* Boards with native USB only (XIAO ESP32S3): no UART bridge */
+    esp_console_dev_usb_serial_jtag_config_t usb_cfg =
+        ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&usb_cfg, &repl_cfg, &repl));
+#else
     esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
 
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_cfg, &repl_cfg, &repl));
+#endif
 
     /* Register commands */
     const esp_console_cmd_t show_cmd = {

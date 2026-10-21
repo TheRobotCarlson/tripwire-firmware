@@ -224,6 +224,7 @@ void oled_print(int col, int row, const char *text)
 
 void oled_flush(void)
 {
+    if (!s_dev) return;   /* never initialised: board has no OLED */
     ssd1306_cmd(0x21); ssd1306_cmd(0); ssd1306_cmd(127); /* col range */
     ssd1306_cmd(0x22); ssd1306_cmd(0); ssd1306_cmd(7);   /* page range */
 
