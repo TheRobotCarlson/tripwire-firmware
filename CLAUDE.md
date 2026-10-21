@@ -154,7 +154,7 @@ batear/
 
 ## Pin Map (pin_config.h, Seeed XIAO ESP32S3 + Wio-SX1262)
 
-Pins match Meshtastic's `seeed_xiao_s3` variant. No OLED, no LED, no VBAT divider. The console is USB Serial/JTAG (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`), since the XIAO has no UART bridge.
+Pins match Meshtastic's `seeed_xiao_s3` variant. No OLED, no LED, no VBAT divider. The console is USB Serial/JTAG (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`), since the XIAO has no UART bridge. The XIAO detector sends a heartbeat every minute, not every 30, because it has no screen or light: the heartbeat is how the field test sees that it is alive and in radio range.
 
 | Function | GPIO | XIAO label |
 |---|---|---|
