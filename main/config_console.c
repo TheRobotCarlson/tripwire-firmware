@@ -178,6 +178,8 @@ static int cmd_show(int argc, char **argv)
         if (opened) {
             print_nvs_str(h, "wifi_ssid", "wifi_ssid");
             print_nvs_str(h, "wifi_pass", "wifi_pass");
+            print_nvs_str(h, "wifi_ssid2", "wifi_ssid2");
+            print_nvs_str(h, "wifi_pass2", "wifi_pass2");
             print_nvs_str(h, "mqtt_url",  "mqtt_url");
             print_nvs_str(h, "mqtt_user", "mqtt_user");
             print_nvs_str(h, "mqtt_pass", "mqtt_pass");
@@ -345,6 +347,8 @@ static int cmd_set(int argc, char **argv)
 #ifdef CONFIG_BATEAR_ROLE_GATEWAY
         printf("  wifi_ssid   — Wi-Fi SSID\n");
         printf("  wifi_pass   — Wi-Fi password\n");
+        printf("  wifi_ssid2  — second Wi-Fi SSID, tried in turn\n");
+        printf("  wifi_pass2  — second Wi-Fi password\n");
         printf("  mqtt_url    — e.g. mqtt://192.168.1.100:1883\n");
         printf("  mqtt_user   — MQTT username\n");
         printf("  mqtt_pass   — MQTT password\n");
@@ -416,6 +420,10 @@ static int cmd_set(int argc, char **argv)
         return set_nvs_str("gateway_cfg", "wifi_ssid", value);
     if (strcmp(key, "wifi_pass") == 0)
         return set_nvs_str("gateway_cfg", "wifi_pass", value);
+    if (strcmp(key, "wifi_ssid2") == 0)
+        return set_nvs_str("gateway_cfg", "wifi_ssid2", value);
+    if (strcmp(key, "wifi_pass2") == 0)
+        return set_nvs_str("gateway_cfg", "wifi_pass2", value);
     if (strcmp(key, "mqtt_url") == 0)
         return set_nvs_str("gateway_cfg", "mqtt_url", value);
     if (strcmp(key, "mqtt_user") == 0)

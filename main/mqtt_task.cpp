@@ -37,6 +37,8 @@ static const char *TAG = "mqtt";
 /* ---- runtime config (populated from NVS → Kconfig fallback) ---- */
 static char s_wifi_ssid[CFG_STR_MAX];
 static char s_wifi_pass[CFG_STR_MAX];
+static char s_wifi_ssid2[CFG_STR_MAX];
+static char s_wifi_pass2[CFG_STR_MAX];
 static char s_mqtt_url[CFG_STR_MAX];
 static char s_mqtt_user[CFG_STR_MAX];
 static char s_mqtt_pass[CFG_STR_MAX];
@@ -45,9 +47,11 @@ static char s_device_id[DEVID_MAX];
 /* ---- WiFi event synchronisation ---- */
 static EventGroupHandle_t s_wifi_eg;
 #define WIFI_CONNECTED_BIT  BIT0
-#define WIFI_FAIL_BIT       BIT1
-#define WIFI_MAX_RETRY      10
+/* Two hotspots: the gateway tries one, then the other, and never gives up,
+ * so it joins whichever phone has its hotspot on, in any order, at any time. */
+#define WIFI_TRIES_PER_NET  3
 static int s_retry_count;
+static int s_wifi_net;
 
 /* ---- MQTT state ---- */
 static esp_mqtt_client_handle_t s_mqtt;
@@ -85,6 +89,8 @@ static void load_config(void)
                      CONFIG_BATEAR_WIFI_SSID);
         load_nvs_str(h, "wifi_pass", s_wifi_pass, sizeof(s_wifi_pass),
                      CONFIG_BATEAR_WIFI_PASS);
+        load_nvs_str(h, "wifi_ssid2", s_wifi_ssid2, sizeof(s_wifi_ssid2), "");
+        load_nvs_str(h, "wifi_pass2", s_wifi_pass2, sizeof(s_wifi_pass2), "");
         load_nvs_str(h, "mqtt_url",  s_mqtt_url,  sizeof(s_mqtt_url),
                      CONFIG_BATEAR_MQTT_BROKER_URL);
         load_nvs_str(h, "mqtt_user", s_mqtt_user, sizeof(s_mqtt_user),
@@ -109,13 +115,27 @@ static void load_config(void)
     snprintf(s_topic_status, sizeof(s_topic_status),
              "batear/nodes/%s/status", s_device_id);
 
-    ESP_LOGI(TAG, "cfg: wifi_ssid=%s mqtt_url=%s device_id=%s",
-             s_wifi_ssid, s_mqtt_url, s_device_id);
+    ESP_LOGI(TAG, "cfg: wifi_ssid=%s wifi_ssid2=%s mqtt_url=%s device_id=%s",
+             s_wifi_ssid, s_wifi_ssid2, s_mqtt_url, s_device_id);
 }
 
 /* ================================================================
  * WiFi STA
  * ================================================================ */
+
+static void wifi_use_net(int n)
+{
+    s_wifi_net = n;
+    const char *ssid = n ? s_wifi_ssid2 : s_wifi_ssid;
+    const char *pass = n ? s_wifi_pass2 : s_wifi_pass;
+    wifi_config_t sta_cfg = {};
+    strncpy(reinterpret_cast<char *>(sta_cfg.sta.ssid),
+            ssid, sizeof(sta_cfg.sta.ssid) - 1);
+    strncpy(reinterpret_cast<char *>(sta_cfg.sta.password),
+            pass, sizeof(sta_cfg.sta.password) - 1);
+    esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+    ESP_LOGI(TAG, "WiFi trying %s", ssid);
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t base,
                                 int32_t id, void *data)
@@ -123,13 +143,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_count < WIFI_MAX_RETRY) {
-            s_retry_count++;
-            ESP_LOGW(TAG, "WiFi retry %d/%d", s_retry_count, WIFI_MAX_RETRY);
-            esp_wifi_connect();
-        } else {
-            xEventGroupSetBits(s_wifi_eg, WIFI_FAIL_BIT);
+        s_retry_count++;
+        if (s_wifi_ssid2[0] && s_retry_count >= WIFI_TRIES_PER_NET) {
+            s_retry_count = 0;
+            wifi_use_net(!s_wifi_net);
         }
+        esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto *ev = static_cast<ip_event_got_ip_t *>(data);
         ESP_LOGI(TAG, "IP: " IPSTR, IP2STR(&ev->ip_info.ip));
@@ -155,26 +174,15 @@ static bool wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, &h_ip));
 
-    wifi_config_t sta_cfg = {};
-    strncpy(reinterpret_cast<char *>(sta_cfg.sta.ssid),
-            s_wifi_ssid, sizeof(sta_cfg.sta.ssid) - 1);
-    strncpy(reinterpret_cast<char *>(sta_cfg.sta.password),
-            s_wifi_pass, sizeof(sta_cfg.sta.password) - 1);
-
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_cfg));
+    wifi_use_net(0);
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    EventBits_t bits = xEventGroupWaitBits(
-        s_wifi_eg, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-        pdFALSE, pdFALSE, portMAX_DELAY);
-
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "WiFi connected to %s", s_wifi_ssid);
-        return true;
-    }
-    ESP_LOGE(TAG, "WiFi FAILED after %d retries", WIFI_MAX_RETRY);
-    return false;
+    xEventGroupWaitBits(s_wifi_eg, WIFI_CONNECTED_BIT,
+                        pdFALSE, pdFALSE, portMAX_DELAY);
+    ESP_LOGI(TAG, "WiFi connected to %s",
+             s_wifi_net ? s_wifi_ssid2 : s_wifi_ssid);
+    return true;
 }
 
 /* ================================================================

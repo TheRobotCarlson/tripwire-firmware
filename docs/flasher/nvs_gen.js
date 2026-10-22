@@ -387,6 +387,8 @@ export function generateWiredNvsImage(deviceId, wiredCfg) {
  * @param {Object}      gwCfg    - Gateway config strings
  * @param {string}      gwCfg.wifiSsid
  * @param {string}      gwCfg.wifiPass
+ * @param {string}      [gwCfg.wifiSsid2] - second hotspot, tried in turn
+ * @param {string}      [gwCfg.wifiPass2]
  * @param {string}      gwCfg.mqttUrl
  * @param {string}      gwCfg.mqttUser
  * @param {string}      gwCfg.mqttPass
@@ -432,6 +434,8 @@ export function generateGatewayNvsImage(devEui, appKey, gwCfg) {
   idx = 1;
   if (gwCfg.wifiSsid) idx = writeStringEntry(p1, idx, 2, "wifi_ssid", gwCfg.wifiSsid);
   if (gwCfg.wifiPass) idx = writeStringEntry(p1, idx, 2, "wifi_pass", gwCfg.wifiPass);
+  if (gwCfg.wifiSsid2) idx = writeStringEntry(p1, idx, 2, "wifi_ssid2", gwCfg.wifiSsid2);
+  if (gwCfg.wifiPass2) idx = writeStringEntry(p1, idx, 2, "wifi_pass2", gwCfg.wifiPass2);
   if (gwCfg.mqttUrl)  idx = writeStringEntry(p1, idx, 2, "mqtt_url",  gwCfg.mqttUrl);
   if (gwCfg.mqttUser) idx = writeStringEntry(p1, idx, 2, "mqtt_user", gwCfg.mqttUser);
   if (gwCfg.mqttPass) idx = writeStringEntry(p1, idx, 2, "mqtt_pass", gwCfg.mqttPass);
