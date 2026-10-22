@@ -184,8 +184,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         wifi_schedule_retry(wifi_setup_active() ? 8000000 : 1000000);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto *ev = static_cast<ip_event_got_ip_t *>(data);
-        ESP_LOGI(TAG, "IP: " IPSTR " on %s", IP2STR(&ev->ip_info.ip),
-                 s_wifi_net ? s_wifi_ssid2 : s_wifi_ssid);
+        ESP_LOGI(TAG, "IP: " IPSTR, IP2STR(&ev->ip_info.ip));
+        ESP_LOGI(TAG, "on %s", s_wifi_net ? s_wifi_ssid2 : s_wifi_ssid);
         s_retry_count = 0;
         s_sta_up = true;
         xEventGroupSetBits(s_wifi_eg, WIFI_CONNECTED_BIT);

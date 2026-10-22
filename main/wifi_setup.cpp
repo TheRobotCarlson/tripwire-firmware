@@ -73,7 +73,7 @@ static void dns_task(void *arg)
     addr.sin_family = AF_INET;
     addr.sin_port = htons(53);
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    if (sock < 0 || bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (sock < 0 || bind(sock, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) < 0) {
         ESP_LOGE(TAG, "DNS socket failed");
         if (sock >= 0) close(sock);
         vTaskDelete(NULL);
@@ -84,10 +84,10 @@ static void dns_task(void *arg)
     for (;;) {
         struct sockaddr_in from;
         socklen_t flen = sizeof(from);
-        int n = recvfrom(sock, buf, sizeof(buf) - 16, 0, (struct sockaddr *)&from, &flen);
+        int n = recvfrom(sock, buf, sizeof(buf) - 16, 0, reinterpret_cast<struct sockaddr *>(&from), &flen);
         if (!s_active) continue;
         int len = dns_reply(buf, n);
-        if (len > 0) sendto(sock, buf, len, 0, (struct sockaddr *)&from, flen);
+        if (len > 0) sendto(sock, buf, len, 0, reinterpret_cast<struct sockaddr *>(&from), flen);
     }
 }
 
