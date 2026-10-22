@@ -12,6 +12,7 @@
  */
 
 #include "mqtt_task.h"
+#include "wifi_setup.h"
 #include "sdkconfig.h"
 
 #include "freertos/FreeRTOS.h"
@@ -48,10 +49,17 @@ static char s_device_id[DEVID_MAX];
 static EventGroupHandle_t s_wifi_eg;
 #define WIFI_CONNECTED_BIT  BIT0
 /* Two hotspots: the gateway tries one, then the other, and never gives up,
- * so it joins whichever phone has its hotspot on, in any order, at any time. */
+ * so it joins whichever phone has its hotspot on, in any order, at any time.
+ * With neither reachable for SETUP_AFTER_US (or none saved), it also opens
+ * its own setup network so a phone can give it a new hotspot (wifi_setup). */
 #define WIFI_TRIES_PER_NET  3
+#define SETUP_AFTER_US      (30LL * 1000000LL)
 static int s_retry_count;
 static int s_wifi_net;
+static volatile bool s_sta_up;
+static esp_timer_handle_t s_retry_timer;
+static int64_t s_down_since_us;
+static volatile int64_t s_saved_at_us;
 
 /* ---- MQTT state ---- */
 static esp_mqtt_client_handle_t s_mqtt;
@@ -137,36 +145,126 @@ static void wifi_use_net(int n)
     ESP_LOGI(TAG, "WiFi trying %s", ssid);
 }
 
+static bool wifi_any_saved(void) { return s_wifi_ssid[0] || s_wifi_ssid2[0]; }
+
+/* Each try scans every channel, and the setup network goes quiet while it
+ * does, so tries are spaced out while setup is open and paused while a phone
+ * is on it. */
+static void wifi_schedule_retry(uint64_t delay_us)
+{
+    if (!wifi_any_saved()) return;
+    esp_timer_stop(s_retry_timer);
+    esp_timer_start_once(s_retry_timer, delay_us);
+}
+
+static void wifi_retry_cb(void *arg)
+{
+    (void)arg;
+    if (s_sta_up) return;
+    if (wifi_setup_has_client()) { wifi_schedule_retry(5000000); return; }
+    esp_wifi_connect();
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t base,
                                 int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if (!s_wifi_ssid[0] && s_wifi_ssid2[0]) wifi_use_net(1);
+        wifi_schedule_retry(100000);
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        s_sta_up = false;
+        xEventGroupClearBits(s_wifi_eg, WIFI_CONNECTED_BIT);
         s_retry_count++;
-        if (s_wifi_ssid2[0] && s_retry_count >= WIFI_TRIES_PER_NET) {
+        const char *cur = s_wifi_net ? s_wifi_ssid2 : s_wifi_ssid;
+        const char *other = s_wifi_net ? s_wifi_ssid : s_wifi_ssid2;
+        if (other[0] && (s_retry_count >= WIFI_TRIES_PER_NET || !cur[0])) {
             s_retry_count = 0;
             wifi_use_net(!s_wifi_net);
         }
-        esp_wifi_connect();
+        wifi_schedule_retry(wifi_setup_active() ? 8000000 : 1000000);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         auto *ev = static_cast<ip_event_got_ip_t *>(data);
-        ESP_LOGI(TAG, "IP: " IPSTR, IP2STR(&ev->ip_info.ip));
+        ESP_LOGI(TAG, "IP: " IPSTR " on %s", IP2STR(&ev->ip_info.ip),
+                 s_wifi_net ? s_wifi_ssid2 : s_wifi_ssid);
         s_retry_count = 0;
+        s_sta_up = true;
         xEventGroupSetBits(s_wifi_eg, WIFI_CONNECTED_BIT);
     }
 }
 
-static bool wifi_init_sta(void)
+/* Called from the setup page's task: the new hotspot goes first, and the one
+ * it replaces stays as the second choice. */
+static void wifi_save_hotspot(const char *ssid, const char *pass)
+{
+    if (strcmp(ssid, s_wifi_ssid) != 0) {
+        strncpy(s_wifi_ssid2, s_wifi_ssid, sizeof(s_wifi_ssid2) - 1);
+        strncpy(s_wifi_pass2, s_wifi_pass, sizeof(s_wifi_pass2) - 1);
+    }
+    strncpy(s_wifi_ssid, ssid, sizeof(s_wifi_ssid) - 1);
+    s_wifi_ssid[sizeof(s_wifi_ssid) - 1] = '\0';
+    strncpy(s_wifi_pass, pass, sizeof(s_wifi_pass) - 1);
+    s_wifi_pass[sizeof(s_wifi_pass) - 1] = '\0';
+
+    nvs_handle_t h;
+    if (nvs_open("gateway_cfg", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, "wifi_ssid", s_wifi_ssid);
+        nvs_set_str(h, "wifi_pass", s_wifi_pass);
+        if (s_wifi_ssid2[0]) {
+            nvs_set_str(h, "wifi_ssid2", s_wifi_ssid2);
+            nvs_set_str(h, "wifi_pass2", s_wifi_pass2);
+        }
+        nvs_commit(h);
+        nvs_close(h);
+    } else {
+        ESP_LOGE(TAG, "couldn't save the hotspot to NVS");
+    }
+    ESP_LOGI(TAG, "hotspot saved: %s (second: %s)", s_wifi_ssid, s_wifi_ssid2);
+    s_saved_at_us = esp_timer_get_time();
+}
+
+/* Opens the setup network when no hotspot can be reached and closes it once
+ * one is. Runs every couple of seconds from MqttTask. */
+static void wifi_supervise(void)
+{
+    int64_t now = esp_timer_get_time();
+    if (s_saved_at_us && now - s_saved_at_us > 3000000) {
+        /* Give the page time to reach the phone, then switch. */
+        s_saved_at_us = 0;
+        wifi_setup_stop();
+        s_retry_count = 0;
+        wifi_use_net(0);
+        s_down_since_us = now;
+        wifi_schedule_retry(500000);
+        return;
+    }
+    if (s_sta_up) {
+        s_down_since_us = 0;
+        if (wifi_setup_active()) wifi_setup_stop();
+        return;
+    }
+    if (!s_down_since_us) s_down_since_us = now;
+    if (!wifi_setup_active() && !s_saved_at_us &&
+        (!wifi_any_saved() || now - s_down_since_us > SETUP_AFTER_US)) {
+        wifi_setup_start(s_device_id, s_wifi_ssid, s_wifi_ssid2, wifi_save_hotspot);
+    }
+}
+
+static void wifi_init_sta(void)
 {
     s_wifi_eg = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wifi_cfg));
+
+    esp_timer_create_args_t targs = {};
+    targs.callback = wifi_retry_cb;
+    targs.name = "wifi_retry";
+    ESP_ERROR_CHECK(esp_timer_create(&targs, &s_retry_timer));
 
     esp_event_handler_instance_t h_wifi, h_ip;
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
@@ -177,12 +275,6 @@ static bool wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     wifi_use_net(0);
     ESP_ERROR_CHECK(esp_wifi_start());
-
-    xEventGroupWaitBits(s_wifi_eg, WIFI_CONNECTED_BIT,
-                        pdFALSE, pdFALSE, portMAX_DELAY);
-    ESP_LOGI(TAG, "WiFi connected to %s",
-             s_wifi_net ? s_wifi_ssid2 : s_wifi_ssid);
-    return true;
 }
 
 /* ================================================================
@@ -439,11 +531,13 @@ extern "C" void MqttTask(void *pvParameters)
 
     load_config();
 
-    if (!wifi_init_sta()) {
-        ESP_LOGE(TAG, "WiFi failed — MQTT task suspending");
-        vTaskSuspend(NULL);
-        return;
+    wifi_init_sta();
+    while (!s_sta_up) {
+        xEventGroupWaitBits(s_wifi_eg, WIFI_CONNECTED_BIT,
+                            pdFALSE, pdFALSE, pdMS_TO_TICKS(2000));
+        wifi_supervise();
     }
+    wifi_supervise();
 
     mqtt_start();
 
@@ -451,7 +545,8 @@ extern "C" void MqttTask(void *pvParameters)
     char json[512];
 
     for (;;) {
-        if (xQueueReceive(g_mqtt_event_queue, &ev, pdMS_TO_TICKS(5000)) == pdTRUE) {
+        wifi_supervise();
+        if (xQueueReceive(g_mqtt_event_queue, &ev, pdMS_TO_TICKS(2000)) == pdTRUE) {
             if (!s_mqtt_connected) {
                 ESP_LOGW(TAG, "MQTT not connected — dropping event");
                 continue;

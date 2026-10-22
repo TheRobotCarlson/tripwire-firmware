@@ -20,3 +20,7 @@ CONFIG_BATEAR_MQTT_BROKER_URL="mqtt://{BROKER_IP}:1883"
 CONFIG_BATEAR_MQTT_USER=""
 CONFIG_BATEAR_MQTT_PASS=""
 CONFIG_BATEAR_GW_DEVICE_ID="gw01"
+
+# The setup network (wifi_setup.cpp) takes the app past 1 MB; the large
+# single-app table keeps NVS at 0x9000, where the flasher writes it
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
