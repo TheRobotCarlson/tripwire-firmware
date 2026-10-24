@@ -2,9 +2,10 @@
  * wifi_setup.h — field setup for the gateway's hotspot (gateway only)
  *
  * While the gateway can't reach any hotspot it knows, it opens its own open
- * WiFi network, "<device_id> setup". A phone that joins it gets a captive
- * page asking for a hotspot name and password; on Save the gateway stores
- * them in NVS, closes the network and joins that hotspot.
+ * WiFi network, "<device_id> setup". A phone that joins it can send a
+ * hotspot name and password from the logger page, or type them into the
+ * gateway's own page at 192.168.4.1; the gateway stores them in NVS, closes
+ * the network and joins that hotspot.
  */
 #pragma once
 

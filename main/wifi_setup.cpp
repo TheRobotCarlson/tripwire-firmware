@@ -3,8 +3,11 @@
  * phone's hotspot in the field. See wifi_setup.h.
  *
  * Every DNS query on the setup network is answered with the gateway's
- * address, and every GET returns the setup page, so phones open it by
- * themselves as a captive portal (iOS hotspot-detect, Android generate_204).
+ * address, and every GET returns the setup page (Android opens it as a
+ * captive portal). Apple's probe gets its Success page instead, so an iPhone
+ * stays joined without the sign-in sheet and the logger page can send the
+ * hotspot: it opens http://192.168.4.1/#s=<name>&p=<password>, and the page
+ * fills its form from that and saves.
  */
 
 #include "wifi_setup.h"
@@ -131,6 +134,11 @@ static void send_escaped(httpd_req_t *req, const char *s)
 
 static esp_err_t page_get(httpd_req_t *req)
 {
+    if (strstr(req->uri, "hotspot-detect") || strstr(req->uri, "/success.htm")) {
+        httpd_resp_set_type(req, "text/html");
+        return httpd_resp_sendstr(req,
+            "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+    }
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_sendstr_chunk(req, PAGE_HEAD);
@@ -145,7 +153,11 @@ static esp_err_t page_get(httpd_req_t *req)
         "<label for=\"p\">Hotspot password</label>"
         "<input id=\"p\" name=\"p\" maxlength=\"63\" autocapitalize=\"off\" autocorrect=\"off\" autocomplete=\"off\" spellcheck=\"false\">"
         "<button>Save and join</button></form>"
-        "<p class=\"n\">On iPhone the hotspot name is the phone's name, in Settings, General, About. The password is in Settings, Personal Hotspot.</p>");
+        "<p class=\"n\">On iPhone the hotspot name is the phone's name, in Settings, General, About. The password is in Settings, Personal Hotspot.</p>"
+        "<script>var h=new URLSearchParams(location.hash.slice(1));"
+        "if(h.get('s')){document.getElementById('s').value=h.get('s');"
+        "document.getElementById('p').value=h.get('p')||'';"
+        "history.replaceState(null,'','/');document.forms[0].submit();}</script>");
     if (s_known1[0] || s_known2[0]) {
         httpd_resp_sendstr_chunk(req, "<p class=\"n\">It already knows <b>");
         send_escaped(req, s_known1[0] ? s_known1 : s_known2);
